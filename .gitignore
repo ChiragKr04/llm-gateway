@@ -1,0 +1,29 @@
+# Binaries
+/bin/
+/gateway
+/mocker
+/bench
+*.exe
+*.test
+
+# Profiling output
+*.pprof
+*.prof
+/cpu.out
+/mem.out
+
+# Secrets and local config
+.env
+.env.*
+*.pem
+config.local.*
+
+# Benchmark scratch output (BENCHMARKS.md itself is tracked)
+/bench-out/
+
+# Editor / OS
+.DS_Store
+.idea/
+.vscode/
+
+.venv*
