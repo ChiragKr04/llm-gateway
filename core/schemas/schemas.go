@@ -7,6 +7,8 @@
 // net/http, fasthttp, or any other transport package.
 package schemas
 
+import "encoding/json"
+
 // Role identifies the author of a Message.
 type Role string
 
@@ -145,6 +147,45 @@ type ToolChoice struct {
 	Name string         `json:"name,omitempty"`
 }
 
+// ResponseFormatType discriminates the constraint placed on the model's output
+// shape.
+type ResponseFormatType string
+
+const (
+	// ResponseFormatText is unconstrained prose, the default when unset.
+	ResponseFormatText ResponseFormatType = "text"
+	// ResponseFormatJSONObject requires syntactically valid JSON, unschema'd.
+	ResponseFormatJSONObject ResponseFormatType = "json_object"
+	// ResponseFormatJSONSchema requires output conforming to a supplied schema.
+	ResponseFormatJSONSchema ResponseFormatType = "json_schema"
+)
+
+// ResponseFormat constrains the shape of the model's output.
+//
+// This is a hard capability constraint, not a quality preference: a model that
+// cannot honour json_schema fails such a request outright rather than answering
+// worse. It is therefore a first-class field, so the router's capability gates
+// read it directly instead of sniffing Extra for a provider-specific key.
+type ResponseFormat struct {
+	Type ResponseFormatType `json:"type"`
+
+	// JSONSchema is set when Type is ResponseFormatJSONSchema.
+	JSONSchema *JSONSchema `json:"json_schema,omitempty"`
+}
+
+// JSONSchema is a named JSON Schema document constraining structured output.
+// Schema stays untyped for the same reason FunctionSchema.Parameters does:
+// providers pass it through verbatim.
+type JSONSchema struct {
+	Name        string         `json:"name"`
+	Description string         `json:"description,omitempty"`
+	Schema      map[string]any `json:"schema,omitempty"`
+
+	// Strict requests exact schema adherence rather than best effort. It is a
+	// pointer so an adapter can tell "unset" from "explicitly false".
+	Strict *bool `json:"strict,omitempty"`
+}
+
 // Request is a canonical completion request. Optional generation parameters are
 // pointers so an adapter can tell "unset" from "explicitly zero" — the two mean
 // different things to most providers.
@@ -165,6 +206,10 @@ type Request struct {
 	Tools      []Tool      `json:"tools,omitempty"`
 	ToolChoice *ToolChoice `json:"tool_choice,omitempty"`
 
+	// ResponseFormat constrains the output shape. See ResponseFormat: routing
+	// treats it as a hard gate.
+	ResponseFormat *ResponseFormat `json:"response_format,omitempty"`
+
 	// User is an opaque end-user identifier forwarded to providers that accept
 	// one for abuse tracking.
 	User string `json:"user,omitempty"`
@@ -172,7 +217,13 @@ type Request struct {
 	// Extra is the escape hatch for provider-specific parameters that have no
 	// canonical equivalent. Adapters merge recognised keys into their native
 	// payload and ignore the rest.
-	Extra map[string]any `json:"extra,omitempty"`
+	//
+	// Values are raw JSON rather than any so they survive a round trip
+	// byte-exactly. Decoding into any turns every number into a float64, which
+	// silently loses precision above 2^53 and defeats type switches in adapters
+	// that expect the int they put in; keeping the bytes also means a
+	// pass-through key is never re-encoded on its way to the provider.
+	Extra map[string]json.RawMessage `json:"extra,omitempty"`
 }
 
 // FinishReason is the canonical vocabulary every provider's completion reason

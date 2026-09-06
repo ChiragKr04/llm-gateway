@@ -130,6 +130,11 @@ Behaviour:
 - Supports two legs in one run: **direct to mocker** and **through gateway**, so conditions are identical.
 - Prints `gateway_overhead_p99 = p99(through) - p99(direct)`.
 
+**Run the mocker with `-tps=0` for every overhead measurement.** Pacing exists so
+`curl -N` is legible by eye; leaving it on injects one timer wait per token into
+both legs and buries the microseconds being measured under mocker scheduling
+noise. Use `-tps` only for manual inspection and for deliberate slow-stream tests.
+
 **Acceptance:**
 - Running against the mocker alone produces a stable baseline across three consecutive runs (< 10% variance).
 - Baseline numbers written to `BENCHMARKS.md`.

@@ -9,6 +9,7 @@ import (
 
 func intPtr(i int) *int           { return &i }
 func floatPtr(f float64) *float64 { return &f }
+func boolPtr(b bool) *bool        { return &b }
 
 // conversation builds a multi-turn exchange that exercises every branch of the
 // schema: a system turn, a multimodal user turn, an assistant tool call, the
@@ -83,7 +84,28 @@ func conversation() *Request {
 			},
 		},
 		ToolChoice: &ToolChoice{Mode: ToolChoiceAuto},
-		Extra:      map[string]any{"reasoning_effort": "low"},
+		ResponseFormat: &ResponseFormat{
+			Type: ResponseFormatJSONSchema,
+			JSONSchema: &JSONSchema{
+				Name:        "weather_answer",
+				Description: "Structured weather reading.",
+				Schema: map[string]any{
+					"type": "object",
+					"properties": map[string]any{
+						"sky": map[string]any{"type": "string"},
+					},
+					"required": []any{"sky"},
+				},
+				Strict: boolPtr(true),
+			},
+		},
+		// Values span the kinds adapters actually put here: a string, a small
+		// number, and an integer too large to survive a float64.
+		Extra: map[string]json.RawMessage{
+			"reasoning_effort": json.RawMessage(`"low"`),
+			"top_k":            json.RawMessage(`40`),
+			"thinking_budget":  json.RawMessage(`9007199254740993`),
+		},
 	}
 }
 
@@ -162,6 +184,61 @@ func TestRequestRoundTripPreservesToolCallDetail(t *testing.T) {
 	// A zero Temperature must stay set rather than collapsing to unset.
 	if got.Temperature == nil || *got.Temperature != 0 {
 		t.Errorf("temperature = %v, want explicit 0", got.Temperature)
+	}
+
+	// response_format is a hard routing gate, so it must arrive as a typed
+	// field rather than something the router has to dig out of Extra.
+	rf := got.ResponseFormat
+	if rf == nil || rf.Type != ResponseFormatJSONSchema {
+		t.Fatalf("response format = %#v, want json_schema", rf)
+	}
+	if rf.JSONSchema == nil || rf.JSONSchema.Name != "weather_answer" {
+		t.Fatalf("json schema = %#v", rf.JSONSchema)
+	}
+	if rf.JSONSchema.Strict == nil || !*rf.JSONSchema.Strict {
+		t.Errorf("strict = %v, want explicit true", rf.JSONSchema.Strict)
+	}
+}
+
+// TestRequestExtraPreservesNumericFidelity pins the policy behind Extra's
+// json.RawMessage value type. Decoding into any would widen every number to a
+// float64: type switches in adapters expecting an int would miss, and an
+// integer above 2^53 would come back changed.
+func TestRequestExtraPreservesNumericFidelity(t *testing.T) {
+	want := &Request{
+		Model: "gpt-oss-120b",
+		Extra: map[string]json.RawMessage{
+			"top_k":            json.RawMessage(`40`),
+			"thinking_budget":  json.RawMessage(`9007199254740993`),
+			"temperature_hint": json.RawMessage(`0.10`),
+		},
+	}
+
+	encoded, err := json.Marshal(want)
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	var got Request
+	if err := json.Unmarshal(encoded, &got); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+
+	for k, w := range want.Extra {
+		if g := string(got.Extra[k]); g != string(w) {
+			t.Errorf("Extra[%q] = %s, want %s", k, g, w)
+		}
+	}
+
+	// The same values through map[string]any is what this type choice avoids;
+	// assert the failure mode explicitly so the rationale cannot silently rot.
+	var loose struct {
+		Extra map[string]any `json:"extra"`
+	}
+	if err := json.Unmarshal(encoded, &loose); err != nil {
+		t.Fatalf("unmarshal loose: %v", err)
+	}
+	if v, ok := loose.Extra["thinking_budget"].(float64); !ok || int64(v) == 9007199254740993 {
+		t.Errorf("expected map[string]any to widen and lose precision, got %#v", loose.Extra["thinking_budget"])
 	}
 }
 

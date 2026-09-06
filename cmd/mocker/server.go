@@ -269,12 +269,28 @@ func (s *Server) streamCompletion(w http.ResponseWriter, r *http.Request, req ch
 
 	ctx := r.Context()
 	interval := s.tokenInterval()
+
+	// One reusable timer for the whole stream. time.After would allocate a
+	// timer per token that cannot be collected until it fires — including when
+	// the ctx.Done() branch wins the select, so every disconnected stream would
+	// leave its entire remaining schedule pending. At benchmark rates that
+	// allocation pressure and scheduler noise land in the very number M2 is
+	// trying to measure, on the baseline leg.
+	var pace *time.Timer
+	if interval > 0 {
+		pace = time.NewTimer(interval)
+		defer pace.Stop()
+	}
+
 	for i := range n {
 		if i > 0 && interval > 0 {
+			// Safe to Reset unconditionally: the only path that leaves pace.C
+			// undrained returns from the loop for good.
+			pace.Reset(interval)
 			select {
 			case <-ctx.Done():
 				return
-			case <-time.After(interval):
+			case <-pace.C:
 			}
 		} else if ctx.Err() != nil {
 			return
