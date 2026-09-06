@@ -123,11 +123,15 @@ type Tool struct {
 }
 
 // FunctionSchema describes a callable function. Parameters holds a JSON Schema
-// document; it stays untyped because providers pass it through verbatim.
+// document, keyed by its top-level members and carrying each member's subtree
+// as raw JSON. Providers pass the document through verbatim, so keeping the
+// bytes avoids a decode/re-encode round trip and preserves numeric literals
+// exactly — schema keywords such as multipleOf, minimum and maximum are
+// meaningfully numeric, and decoding into any would widen them to float64.
 type FunctionSchema struct {
-	Name        string         `json:"name"`
-	Description string         `json:"description,omitempty"`
-	Parameters  map[string]any `json:"parameters,omitempty"`
+	Name        string                     `json:"name"`
+	Description string                     `json:"description,omitempty"`
+	Parameters  map[string]json.RawMessage `json:"parameters,omitempty"`
 }
 
 // ToolChoiceMode constrains whether and how the model may call tools.
@@ -174,12 +178,14 @@ type ResponseFormat struct {
 }
 
 // JSONSchema is a named JSON Schema document constraining structured output.
-// Schema stays untyped for the same reason FunctionSchema.Parameters does:
-// providers pass it through verbatim.
+// Schema is shaped and kept raw for the same reasons as
+// FunctionSchema.Parameters. Note that this shape assumes the document's root
+// is a JSON object; a bare boolean root, legal in JSON Schema but rejected by
+// every provider's structured-output mode, cannot be represented.
 type JSONSchema struct {
-	Name        string         `json:"name"`
-	Description string         `json:"description,omitempty"`
-	Schema      map[string]any `json:"schema,omitempty"`
+	Name        string                     `json:"name"`
+	Description string                     `json:"description,omitempty"`
+	Schema      map[string]json.RawMessage `json:"schema,omitempty"`
 
 	// Strict requests exact schema adherence rather than best effort. It is a
 	// pointer so an adapter can tell "unset" from "explicitly false".

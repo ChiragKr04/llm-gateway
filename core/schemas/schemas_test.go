@@ -72,13 +72,10 @@ func conversation() *Request {
 				Function: &FunctionSchema{
 					Name:        "get_weather",
 					Description: "Look up current weather for a city.",
-					Parameters: map[string]any{
-						"type": "object",
-						"properties": map[string]any{
-							"city": map[string]any{"type": "string"},
-							"unit": map[string]any{"type": "string", "enum": []any{"c", "f"}},
-						},
-						"required": []any{"city"},
+					Parameters: map[string]json.RawMessage{
+						"type":       json.RawMessage(`"object"`),
+						"properties": json.RawMessage(`{"city":{"type":"string"},"unit":{"type":"string","enum":["c","f"]}}`),
+						"required":   json.RawMessage(`["city"]`),
 					},
 				},
 			},
@@ -89,12 +86,13 @@ func conversation() *Request {
 			JSONSchema: &JSONSchema{
 				Name:        "weather_answer",
 				Description: "Structured weather reading.",
-				Schema: map[string]any{
-					"type": "object",
-					"properties": map[string]any{
-						"sky": map[string]any{"type": "string"},
-					},
-					"required": []any{"sky"},
+				Schema: map[string]json.RawMessage{
+					"type":       json.RawMessage(`"object"`),
+					"properties": json.RawMessage(`{"sky":{"type":"string"}}`),
+					// A numeric keyword: decoded into any this would become a
+					// float64 and re-encode as 0.1 rather than the bytes sent.
+					"multipleOf": json.RawMessage(`0.10`),
+					"required":   json.RawMessage(`["sky"]`),
 				},
 				Strict: boolPtr(true),
 			},
@@ -197,6 +195,22 @@ func TestRequestRoundTripPreservesToolCallDetail(t *testing.T) {
 	}
 	if rf.JSONSchema.Strict == nil || !*rf.JSONSchema.Strict {
 		t.Errorf("strict = %v, want explicit true", rf.JSONSchema.Strict)
+	}
+	// The schema document is pass-through: every member must come back as the
+	// exact bytes it went in as, numeric keywords included.
+	if got, want := string(rf.JSONSchema.Schema["multipleOf"]), "0.10"; got != want {
+		t.Errorf("schema multipleOf = %s, want %s", got, want)
+	}
+	if got, want := string(rf.JSONSchema.Schema["properties"]), `{"sky":{"type":"string"}}`; got != want {
+		t.Errorf("schema properties = %s, want %s", got, want)
+	}
+
+	tool := got.Tools[0]
+	if tool.Function == nil {
+		t.Fatalf("tool function missing")
+	}
+	if got, want := string(tool.Function.Parameters["required"]), `["city"]`; got != want {
+		t.Errorf("tool parameters required = %s, want %s", got, want)
 	}
 }
 
