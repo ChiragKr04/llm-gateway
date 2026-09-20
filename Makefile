@@ -20,13 +20,19 @@ check-core:
 		echo "FAIL: core/ leaked a transport dependency"; exit 1; \
 	else echo "OK: core is transport-free"; fi
 
-# bench starts the mocker, runs both legs (direct and through the gateway) and
-# prints the overhead delta. Implemented in M2; the driver does not exist yet.
+# bench starts the mocker, runs every available leg and prints the overhead
+# delta. The gateway leg is included automatically once cmd/gateway builds.
+# Every knob is an environment variable: make bench RPS=2000 DURATION=10s
 bench:
-	@echo "bench: not implemented until M2 (cmd/bench, cmd/mocker)"
+	@bash scripts/bench.sh
 
-# profile captures cpu + alloc pprof for a bench run. Implemented in M2.
+# profile captures cpu + alloc pprof of the load driver. From M3 the gateway's
+# own profile is the interesting one; this is the driver's, which is how you
+# confirm a reported number is the server's cost and not the driver's.
 profile:
-	@echo "profile: not implemented until M2"
+	@BENCH_FLAGS="-cpuprofile bench-out/cpu.pprof -memprofile bench-out/mem.pprof" \
+		RUNS=1 bash scripts/bench.sh
+	@echo "profiles: bench-out/cpu.pprof bench-out/mem.pprof"
+	@echo "inspect:  go tool pprof -http=: bench-out/cpu.pprof"
 
 verify: build test lint check-core bench
